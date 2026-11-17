@@ -135,3 +135,17 @@ artifacts/retrieval/   Generated FAISS index and metadata; Git-ignored
 ## Latest validation
 
 The current local run passed all 8 tests (including 10 document subtests). On the 15-question evaluation set, dense retrieval and dense + BM25 + RRF both scored 1.000 for Hit Rate@5, MRR@5, Recall@10, and nDCG@10. This set does not show a metric gain from BM25; BM25 remains useful to test exact identifiers and terms beyond this small set. MiniLM reranking lowered MRR@5 to 0.967 and nDCG@10 to 0.975, so it remains disabled by default. See [the full submission validation report](docs/submission-validation.md) for the sample answer and API check.
+
+## Screenshots
+
+The screenshots below show answers with their policy citations in the local chat interface.
+
+![Password and lost-device policy answers](docs/screenshots/password-and-lost-device.png)
+
+![International travel approval answer](docs/screenshots/international-travel-approval.png)
+
+![Remote collaboration hours answer](docs/screenshots/remote-collaboration-hours.png)
+
+![Remote internet allowance answer](docs/screenshots/remote-internet-allowance.png)
+
+![Learning allowance answer](docs/screenshots/learning-allowance.png)
