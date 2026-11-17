@@ -19,7 +19,7 @@ It is intended as a learning and evaluation prototype. It does not include produ
 
 1. The original question and a compact keyword version are embedded together. The compact version is built locally, without another Gemini request.
 2. FAISS searches both vectors, while BM25 searches the original child text for exact words, numbers, and identifiers. Reciprocal Rank Fusion combines all ranked lists using `1 / (60 + rank)`, so dense search contributes semantic matches and BM25 contributes lexical matches without comparing their raw scores.
-3. An optional local `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker can reorder candidates. It is disabled by default: an earlier dense-only comparison on the 15-question set showed no recall gain and slightly lower MRR and nDCG. The evaluator now measures it after hybrid retrieval as well; those results have not yet been recorded.
+3. An optional local `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker can reorder candidates. It is disabled by default: the latest 15-question comparison still shows slightly lower MRR and nDCG after MiniLM reranking. See [the submission validation report](docs/submission-validation.md) for the measured results.
 4. Selected child passages are expanded to their parent sections for generation.
 5. Gemini generates an answer from retrieved evidence and adds citation labels. Citation validation checks that labels refer to supplied sources and that answer sentences include citations. It does not establish that a cited source semantically supports every claim.
 
@@ -131,3 +131,7 @@ artifacts/retrieval/   Generated FAISS index and metadata; Git-ignored
 - **No authentication.** Keep the API bound to localhost; do not expose it to a network without adding access controls.
 - **Single-browser chat history.** Conversation history is held in browser memory and is lost when the tab is closed. It is not shared across users or devices.
 - **Reranker results are corpus-dependent.** MiniLM is optional and its score is not a probability. An earlier dense-only comparison showed a small ranking regression. Reranking stays disabled by default until its effect on hybrid results is measured.
+
+## Latest validation
+
+The current local run passed all 8 tests (including 10 document subtests). On the 15-question evaluation set, dense retrieval and dense + BM25 + RRF both scored 1.000 for Hit Rate@5, MRR@5, Recall@10, and nDCG@10. This set does not show a metric gain from BM25; BM25 remains useful to test exact identifiers and terms beyond this small set. MiniLM reranking lowered MRR@5 to 0.967 and nDCG@10 to 0.975, so it remains disabled by default. See [the full submission validation report](docs/submission-validation.md) for the sample answer and API check.

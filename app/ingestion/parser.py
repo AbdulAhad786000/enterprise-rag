@@ -79,13 +79,13 @@ def parse_docx(
 def parse_pdf(file_path: Path, metadata: DocumentMetadata) -> ParsedDocument:
     """Extract PDF text and infer section headings from span typography."""
 
-    import fitz
+    import pymupdf
     import statistics
 
     blocks: list[ParsedBlock] = []
     section_stack: list[str] = []
 
-    with fitz.open(file_path) as pdf:
+    with pymupdf.open(file_path) as pdf:
         pages = [page.get_text("dict") for page in pdf]
         font_sizes = [
             span["size"]
