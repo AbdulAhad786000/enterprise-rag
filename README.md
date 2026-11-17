@@ -149,3 +149,7 @@ The screenshots below show answers with their policy citations in the local chat
 ![Remote internet allowance answer](docs/screenshots/remote-internet-allowance.png)
 
 ![Learning allowance answer](docs/screenshots/learning-allowance.png)
+
+![Annual leave answer](docs/screenshots/annual-leave-answer.png)
+
+![Parental leave answer](docs/screenshots/parental-leave-answer.png)
