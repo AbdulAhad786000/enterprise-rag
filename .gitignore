@@ -1,0 +1,31 @@
+﻿# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment variables and secrets
+.env
+
+# Generated data
+data/raw/*
+!data/raw/.gitkeep
+
+data/processed/*
+!data/processed/.gitkeep
+
+# Vector indexes and generated storage
+storage/*
+!storage/.gitkeep
+
+# Testing and linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+# Generated FAISS indexes, manifests, and runtime state
+artifacts/

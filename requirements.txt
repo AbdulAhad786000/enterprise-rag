@@ -1,0 +1,11 @@
+google-genai==3.3.0
+faiss-cpu==1.16.0
+numpy==2.4.6
+python-docx==1.2.0
+tiktoken==0.14.0
+PyMuPDF==2.1
+sentence-transformers==6.3.0
+transformers==5.23.0
+torch==2.15.0
+fastapi==0.163.1
+uvicorn==0.54.0

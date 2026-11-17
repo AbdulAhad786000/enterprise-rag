@@ -1,0 +1,62 @@
+[
+  {
+    "query": "How long must a full-time employee work before becoming eligible for benefits?",
+    "relevant_child_ids": ["8694378b0a89aa52"]
+  },
+  {
+    "query": "What percentage of the employee health insurance premium does the company pay?",
+    "relevant_child_ids": ["7976d896f3102519"]
+  },
+  {
+    "query": "What is the yearly maximum for approved job-related learning expenses?",
+    "relevant_child_ids": ["eee0c99b23843971"]
+  },
+  {
+    "query": "Who must approve domestic and international travel before booking?",
+    "relevant_child_ids": ["c40126dae807a853"]
+  },
+  {
+    "query": "What are the daily meal reimbursement limits for domestic and international travel?",
+    "relevant_child_ids": ["4ce77413177bacf3"]
+  },
+  {
+    "query": "How soon after a trip must an employee submit an expense claim?",
+    "relevant_child_ids": ["a31f52360a12eb07"]
+  },
+  {
+    "query": "How many annual leave days does a full-time employee receive each year?",
+    "relevant_child_ids": ["78f3faef77c54b0c"]
+  },
+  {
+    "query": "When does an employee need to submit a medical certificate for sick leave?",
+    "relevant_child_ids": ["421e73ac293bf6cf"]
+  },
+  {
+    "query": "What happens after three late arrivals in a month?",
+    "relevant_child_ids": ["61fdb9e624a3e1b1"]
+  },
+  {
+    "query": "What is the minimum length for a company account password?",
+    "relevant_child_ids": ["48926a9f6b11fdcc"]
+  },
+  {
+    "query": "How quickly must a lost company laptop be reported?",
+    "relevant_child_ids": ["4ca181d2a854cf8f"]
+  },
+  {
+    "query": "Can Restricted company information be stored in a public repository?",
+    "relevant_child_ids": ["0d7d7e6fc2337af1"]
+  },
+  {
+    "query": "When may an employee request regular remote work, and how quickly should the manager decide?",
+    "relevant_child_ids": ["289d4e7b5d708fac"]
+  },
+  {
+    "query": "What hours are the core collaboration window for remote employees?",
+    "relevant_child_ids": ["1f189799328bc9fd"]
+  },
+  {
+    "query": "How often can a manager review an approved remote-work arrangement?",
+    "relevant_child_ids": ["5b201209b6ae675e"]
+  }
+]
