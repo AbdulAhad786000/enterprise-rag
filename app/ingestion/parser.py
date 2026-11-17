@@ -77,28 +77,93 @@ def parse_docx(
 
 
 def parse_pdf(file_path: Path, metadata: DocumentMetadata) -> ParsedDocument:
-    """Extract page text from a PDF and preserve page numbers."""
+    """Extract PDF text and infer section headings from span typography."""
 
     import fitz
+    import statistics
 
     blocks: list[ParsedBlock] = []
+    section_stack: list[str] = []
+
     with fitz.open(file_path) as pdf:
-        for page_index, page in enumerate(pdf):
-            text = page.get_text("text").strip()
-            if not text:
-                continue
-            paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
-            if not paragraphs:
-                paragraphs = [text]
-            for paragraph_index, paragraph in enumerate(paragraphs):
+        pages = [page.get_text("dict") for page in pdf]
+        font_sizes = [
+            span["size"]
+            for page_data in pages
+            for block in page_data.get("blocks", [])
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+            for span in line.get("spans", [])
+            if span.get("text", "").strip()
+        ]
+        body_size = statistics.median(font_sizes) if font_sizes else 12.0
+
+        def flush_body(lines: list[str], page_number: int) -> None:
+            text = " ".join(line.strip() for line in lines).strip()
+            if text:
                 blocks.append(ParsedBlock(
-                    text=paragraph,
-                    page_number=page_index + 1,
-                    paragraph_index=paragraph_index,
+                    text=text,
+                    page_number=page_number,
+                    paragraph_index=len(blocks),
+                    section_path=section_stack.copy(),
                 ))
+            lines.clear()
+
+        for page_index, page_data in enumerate(pages):
+            page_number = page_index + 1
+            for text_block in page_data.get("blocks", []):
+                if text_block.get("type") != 0:
+                    continue
+                body_lines: list[str] = []
+                for line in text_block.get("lines", []):
+                    spans = [
+                        span for span in line.get("spans", [])
+                        if span.get("text", "").strip()
+                    ]
+                    if not spans:
+                        continue
+                    text = re.sub(
+                        r"\s+", " ",
+                        "".join(span["text"] for span in spans),
+                    ).strip()
+                    if not text:
+                        continue
+
+                    font_size = max(span.get("size", body_size) for span in spans)
+                    character_count = sum(len(span["text"].strip()) for span in spans)
+                    bold_count = sum(
+                        len(span["text"].strip())
+                        for span in spans
+                        if span.get("flags", 0) & (1 << 4)
+                    )
+                    mostly_bold = character_count > 0 and bold_count / character_count >= 0.7
+                    short_heading = len(text) <= 120 and not re.search(r"[.!?]$", text)
+                    is_heading = short_heading and (
+                        font_size > body_size * 1.15
+                        or (mostly_bold and font_size >= body_size * 0.95)
+                    )
+
+                    if is_heading:
+                        flush_body(body_lines, page_number)
+                        if font_size > body_size * 1.4:
+                            level = 1
+                        elif font_size > body_size * 1.15:
+                            level = 2
+                        else:
+                            level = 3
+                        section_stack[:] = section_stack[:level - 1]
+                        section_stack.append(text)
+                        blocks.append(ParsedBlock(
+                            text=text,
+                            page_number=page_number,
+                            paragraph_index=len(blocks),
+                            section_path=section_stack.copy(),
+                        ))
+                    else:
+                        body_lines.append(text)
+                flush_body(body_lines, page_number)
 
     return ParsedDocument(metadata=metadata, blocks=blocks)
-
 
 def parse_markdown(file_path: Path, metadata: DocumentMetadata) -> ParsedDocument:
     """Parse Markdown headings, paragraphs, lists, and table rows."""

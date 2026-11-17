@@ -9,6 +9,7 @@ import re
 
 import faiss
 import numpy as np
+from rank_bm25 import BM25Okapi
 
 from app.embeddings.contextualize import build_embedding_text
 from app.embeddings.gemini import GeminiEmbedder, MODEL_NAME
@@ -31,6 +32,12 @@ _QUERY_STOPWORDS = {
     "on", "or", "please", "tell", "that", "the", "their", "this", "to",
     "what", "when", "where", "which", "who", "why", "with", "would",
 }
+
+
+
+def _tokenize_for_bm25(text: str) -> list[str]:
+    """Normalize words and numeric identifiers for lexical retrieval."""
+    return re.findall(r"[a-z0-9]+", text.casefold())
 
 
 def build_query_variants(query: str) -> list[str]:
@@ -83,7 +90,7 @@ class ParentContext:
 
 
 class DenseRetriever:
-    """FAISS search over child chunks, with parent-section expansion."""
+    """Hybrid dense and BM25 search over child chunks, with parent expansion."""
 
     def __init__(
         self,
@@ -99,6 +106,8 @@ class DenseRetriever:
         self.children = children
         self.index = index
         self.embedder = embedder
+        # Rebuild the lightweight lexical index from the persisted child text.
+        self.bm25 = BM25Okapi([_tokenize_for_bm25(child.text) for child in children])
 
         missing_parent_ids = {
             child.parent_id
@@ -283,8 +292,9 @@ class DenseRetriever:
         self,
         query: str,
         candidate_count: int,
+        include_bm25: bool = True,
     ) -> list[ChildHit]:
-        """Retrieve variants and combine their ranked lists with RRF."""
+        """Fuse dense query variants and optionally lexical rankings with RRF."""
         if not query.strip():
             raise ValueError("Query cannot be empty.")
         if candidate_count < 1:
@@ -312,12 +322,31 @@ class DenseRetriever:
                 fused[pos] = fused.get(pos, 0.0) + 1.0 / (RRF_K + rank)
                 best_dense[pos] = max(best_dense.get(pos, float("-inf")), float(score))
 
+        if include_bm25:
+            for variant in variants:
+                tokens = _tokenize_for_bm25(variant)
+                if not tokens:
+                    continue
+                lexical_scores = self.bm25.get_scores(tokens)
+                lexical_ranked = sorted(
+                    enumerate(lexical_scores),
+                    key=lambda pair: pair[1],
+                    reverse=True,
+                )
+                lexical_ranked = [
+                    (position, score)
+                    for position, score in lexical_ranked
+                    if score > 0
+                ][:count]
+                for rank, (position, _score) in enumerate(lexical_ranked, start=1):
+                    fused[position] = fused.get(position, 0.0) + 1.0 / (RRF_K + rank)
+
         candidates = [
             ChildHit(
                 child=self.children[pos],
                 score=rrf,
                 rrf_score=rrf,
-                dense_score=best_dense[pos],
+                dense_score=best_dense.get(pos),
             )
             for pos, rrf in fused.items()
         ]
@@ -351,7 +380,7 @@ class DenseRetriever:
         candidate_count: int = 20,
         use_reranker: bool | None = None,
     ) -> list[ChildHit]:
-        """Fuse query-variant rankings with RRF and optionally rerank them."""
+        """Fuse dense and BM25 rankings with RRF; optionally rerank candidates."""
         candidates = self._fuse_query_rankings(query, candidate_count)
         rerank_enabled = ENABLE_RERANKER if use_reranker is None else use_reranker
         if rerank_enabled:
@@ -507,7 +536,7 @@ def _metric_totals(
 
 
 def evaluate_index(questions_path: Path) -> None:
-    """Compare dense, multi-query/RRF, and reranked retrieval."""
+    """Compare dense, multi-query, hybrid BM25, and reranked retrieval."""
 
     retriever = DenseRetriever.load(
         directory=INDEX_DIR,
@@ -519,8 +548,9 @@ def evaluate_index(questions_path: Path) -> None:
 
     totals = {
         "Dense baseline": [0.0, 0.0, 0.0, 0.0],
-        "Multi-query + RRF": [0.0, 0.0, 0.0, 0.0],
-        "Multi-query + RRF + MiniLM": [0.0, 0.0, 0.0, 0.0],
+        "Multi-query dense + RRF": [0.0, 0.0, 0.0, 0.0],
+        "Dense + BM25 + RRF": [0.0, 0.0, 0.0, 0.0],
+        "Dense + BM25 + RRF + MiniLM": [0.0, 0.0, 0.0, 0.0],
     }
     count = len(questions)
     for item in questions:
@@ -530,13 +560,18 @@ def evaluate_index(questions_path: Path) -> None:
 
         query = item["query"]
         dense_hits = retriever.search_children(query, top_k=20)
-        rrf_pool = retriever._fuse_query_rankings(query, candidate_count=20)
-        rrf_hits = rrf_pool[:20]
-        reranked_hits = retriever.rerank_candidates(query, rrf_pool)[:20]
+        dense_rrf_pool = retriever._fuse_query_rankings(
+            query, candidate_count=20, include_bm25=False
+        )
+        hybrid_pool = retriever._fuse_query_rankings(
+            query, candidate_count=20, include_bm25=True
+        )
+        reranked_hits = retriever.rerank_candidates(query, hybrid_pool)[:20]
         ranked_sets = (
             ("Dense baseline", dense_hits),
-            ("Multi-query + RRF", rrf_hits),
-            ("Multi-query + RRF + MiniLM", reranked_hits),
+            ("Multi-query dense + RRF", dense_rrf_pool[:20]),
+            ("Dense + BM25 + RRF", hybrid_pool[:20]),
+            ("Dense + BM25 + RRF + MiniLM", reranked_hits),
         )
         for label, hits in ranked_sets:
             ranked_ids = [hit.child.child_id for hit in hits]

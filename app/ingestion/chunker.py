@@ -14,6 +14,8 @@ TARGET_TOKENS = 300
 MAX_TOKENS = 400
 OVERLAP_TOKENS = 40
 
+# GPT cl100k_base is used as a practical approximation; Gemini token counts differ.
+# Chunk limits are therefore approximate, not exact Gemini token limits.
 ENCODING = tiktoken.get_encoding("cl100k_base")
 
 

@@ -9,3 +9,4 @@ transformers==5.23.0
 torch==2.15.0
 fastapi==0.163.1
 uvicorn==0.54.0
+rank-bm25==0.2.2

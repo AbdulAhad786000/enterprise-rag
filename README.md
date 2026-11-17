@@ -1,37 +1,47 @@
 # Enterprise Knowledge Intelligence Platform
 
-A local prototype that ingests company policy documents, retrieves evidence, and generates cited answers.
+A local RAG (Retrieval-Augmented Generation) prototype that answers questions about company policy documents with inline citations. Add PDF, DOCX, or Markdown files, build the index, then ask questions from the command line or the local chat page.
+
+It is intended as a learning and evaluation prototype. It does not include production authentication or multi-user access controls.
 
 ## Architecture and data flow
 
 ### Offline indexing
 
-1. `app/ingestion/loader.py` finds PDF, DOCX, and Markdown files.
-2. `app/ingestion/parser.py` extracts text and structure. PDF blocks retain page numbers; DOCX tables are converted to labeled rows; Markdown headings become section paths.
-3. `app/ingestion/chunker.py` creates parent sections and smaller child passages. The child is the precise retrieval unit; its parent supplies surrounding context.
-4. `app/embeddings/contextualize.py` prefixes document title, ID, department, version, date, and heading path to the embedding input. The original child text stays unchanged for citations.
-5. `app/embeddings/gemini.py` embeds child passages with `gemini-embedding-2`.
-6. `app/retrieval.py` normalizes vectors and saves them to FAISS, with chunk metadata in `chunks.json` and build information in `manifest.json`.
+1. `app/ingestion/loader.py` finds supported PDF, DOCX, and Markdown files.
+2. `app/ingestion/parser.py` extracts text and structure. DOCX headings and Markdown headings become section paths; DOCX tables become labeled rows. PDF pages retain page numbers, and likely headings are inferred from font size and bold styling. PDF heading detection is heuristic and can miss or misclassify headings.
+3. `app/ingestion/chunker.py` groups parsed blocks into parent sections, then splits them into overlapping child passages. Children are the retrieval units; parent sections supply surrounding context.
+4. `app/embeddings/contextualize.py` adds document title, ID, department, version, date, and heading path to each embedding input. The original child text remains unchanged for citations.
+5. `app/embeddings/gemini.py` embeds child passages with the configured Gemini embedding model.
+6. `app/retrieval.py` normalizes vectors and saves them in a local FAISS index. Chunk metadata is stored in `chunks.json`, and build information is stored in `manifest.json`.
 
 ### Query and answer
 
-1. The original question and a compact keyword version are embedded together.
-2. FAISS searches both vectors. Reciprocal Rank Fusion combines the lists using `1 / (60 + rank)`, so it combines positions without comparing raw vector scores.
-3. The optional local `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker reads each shortlisted question/passage pair together and sorts candidates by relevance. It runs locally on CPU; its first use downloads model weights, then later runs use the local cache. It is disabled by default because the current 15-question comparison showed no recall gain and slightly lower MRR/nDCG; keep it enabled only if later evaluation supports it.
-4. Retrieval expands selected children to their parent sections and removes duplicate child passages.
-5. Gemini generation uses only that evidence, with inline citation labels. Citation validation checks that labels exist and each answer sentence cites a supplied source. This is citation-reference validation, not proof that a claim is semantically supported.
+1. The original question and a compact keyword version are embedded together. The compact version is built locally, without another Gemini request.
+2. FAISS searches both vectors, while BM25 searches the original child text for exact words, numbers, and identifiers. Reciprocal Rank Fusion combines all ranked lists using `1 / (60 + rank)`, so dense search contributes semantic matches and BM25 contributes lexical matches without comparing their raw scores.
+3. An optional local `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker can reorder candidates. It is disabled by default: an earlier dense-only comparison on the 15-question set showed no recall gain and slightly lower MRR and nDCG. The evaluator now measures it after hybrid retrieval as well; those results have not yet been recorded.
+4. Selected child passages are expanded to their parent sections for generation.
+5. Gemini generates an answer from retrieved evidence and adds citation labels. Citation validation checks that labels refer to supplied sources and that answer sentences include citations. It does not establish that a cited source semantically supports every claim.
 
-There is deliberately no BM25 component in this architecture. Dense search, multi-query/RRF, and MiniLM reranking are the agreed retrieval stages.
+The standard retrieval path is hybrid: dense search handles semantic matches, BM25 helps with exact terms and numbers, and RRF fuses their ranked lists. BM25 is rebuilt from saved child text when the local index loads, so it requires no extra Gemini calls and no separate persisted artifact.
 
-## Gemini fallback
+## Example
 
-The generation order is configured in `.env`: one primary model and four fallbacks. A 429 rate/quota response skips that model immediately and places it on a five-minute cooldown persisted under `artifacts/retrieval/`, so the next CLI run also skips it. A transient 5xx response is retried once, then the next model is tried. A timeout/network failure moves to the next model. Authentication and malformed-request errors stop immediately because another model cannot fix them. The chosen model and failover reason appear in terminal progress.
+**Question:** How many annual leave days are available?
 
-Fallback applies to **generation**. Embeddings remain on one model because vectors from different embedding models must not be mixed with this FAISS index. Switching embedding models requires rebuilding the entire index.
+**Answer:** Full-time employees receive 20 annual leave days per calendar year [S1]. Up to 5 unused days may be carried forward into the next calendar year [S1]. Part-time and contract employees' entitlements are determined by their individual employment agreements [S1].
+
+**Source:** [S1] HR Employee Handbook — Section: 3. Annual Leave Policy.
+
+## Gemini model fallback
+
+Generation tries the configured primary model, followed by the ordered fallback models in `.env`. A quota response skips that model and puts it on a cooldown saved under `artifacts/retrieval/`. A temporary server error is retried once before moving to the next model. Network timeouts also move to the next model. Authentication and malformed-request errors stop immediately because switching models will not resolve them.
+
+Fallback applies to generation only. Embeddings use one configured model because vectors from different embedding models cannot be mixed in one FAISS index. Changing the embedding model requires rebuilding the index.
 
 ## Setup (PowerShell)
 
-Run commands from the project root:
+Run these commands from the project root:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -41,21 +51,15 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Paste the Gemini key after `GEMINI_API_KEY=` and save. `.env` is ignored by Git. The current index was built with `gemini-embedding-001`, so after switching to Embedding 2, rebuild it before searching or generating answers. The sample `.env.example` is safe to commit. If `.env` already exists, do not overwrite it with `Copy-Item`.
-
-## Commands
-
-After the index already uses the configured embedding model, you can validate its saved FAISS artifacts and write a manifest offline (no Gemini call):
-
-```powershell
-python -m app.retrieval manifest
-```
-
-Build or refresh the FAISS index (calls Gemini embeddings for all chunks):
+Add your Gemini key after `GEMINI_API_KEY=` and save. The `.env` file is ignored by Git. Put the policy files you want to query in `data/raw/`; source documents and generated indexes are not included in this public repository. Then build the index:
 
 ```powershell
 python -m app.retrieval build
 ```
+
+Build a fresh index after changing source files or the configured embedding model. The build reads the complete `data/raw/` corpus and replaces the saved index artifacts; single-document incremental updates are not supported.
+
+## Commands
 
 Search and show ranked evidence:
 
@@ -63,11 +67,13 @@ Search and show ranked evidence:
 python -m app.retrieval search "How many annual leave days are available?"
 ```
 
-Compare dense, multi-query + RRF, and multi-query + RRF + MiniLM on the labeled question set:
+Compare the dense baseline, dense multi-query/RRF, hybrid dense + BM25 + RRF, and hybrid reranking against the labeled question set:
 
 ```powershell
 python -m app.retrieval evaluate
 ```
+
+The set is `data/evaluation/retrieval_questions.json`. Each entry contains a `query` and one or more manually labeled `relevant_child_ids`. Add questions with relevant IDs from the current index. The set currently has 15 questions and is intended for development comparisons, not as a general accuracy guarantee.
 
 Generate a grounded answer:
 
@@ -75,25 +81,53 @@ Generate a grounded answer:
 python -m app.generation "How many annual leave days are available?"
 ```
 
-Run the local API, bound to localhost:
+Start the local chat API:
 
 ```powershell
 python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/` for the chat page. It keeps up to eight recent turns in browser memory while the tab stays open; short follow-up questions use the preceding user question to retrieve the right policy section. Use **New chat** to clear the conversation. The app also provides `GET /health`, `GET /v1/index`, `POST /v1/query` with `{"question":"..."}`, and `POST /v1/feedback` with a request ID and 1–5 rating. Interactive API docs are at `/docs`. This prototype has no authentication; keep it bound to localhost.
+Open `http://127.0.0.1:8000/`. The chat page keeps up to eight recent turns in browser memory while the tab stays open; short follow-up questions use the preceding user question to retrieve the relevant section. Use **New chat** to clear the conversation. The API also provides `GET /health`, `GET /v1/index`, `POST /v1/query`, `POST /v1/feedback`, and interactive docs at `/docs`.
 
 ## Configuration
 
-- `GEMINI_API_KEY`: local secret, never commit it.
-- `GEMINI_EMBEDDING_MODEL` and `GEMINI_EMBEDDING_DIMENSIONS`: embedding-space configuration; changing either requires rebuilding every vector.
-- `GEMINI_GENERATION_PRIMARY_MODEL` and `GEMINI_GENERATION_FALLBACK_MODELS`: ordered generation cascade.
-- `GEMINI_REQUEST_TIMEOUT_MS`: timeout per Gemini HTTP request.
+- `GEMINI_API_KEY`: local secret; never commit it.
+- `GEMINI_EMBEDDING_MODEL` and `GEMINI_EMBEDDING_DIMENSIONS`: embedding-space configuration. Changing either requires rebuilding all vectors.
+- `GEMINI_GENERATION_PRIMARY_MODEL` and `GEMINI_GENERATION_FALLBACK_MODELS`: ordered generation fallback chain.
+- `GEMINI_REQUEST_TIMEOUT_MS`: timeout for each Gemini request.
 - `GEMINI_MODEL_COOLDOWN_SECONDS`: generation model cooldown after quota errors.
-- `EVIDENCE_TOKEN_BUDGET`: maximum approximate source-evidence tokens sent to generation.
-- `RRF_K`: RRF rank constant, default 60.
-- `RERANKER_MODEL`, `RERANKER_CANDIDATES`, `ENABLE_RERANKER`: local reranking settings.
+- `EVIDENCE_TOKEN_BUDGET`: approximate maximum source-evidence token budget. Chunk and evidence counts use GPT `cl100k_base` as an approximation, so they may differ from Gemini's tokenizer.
+- `RRF_K`: RRF rank constant; default is 60.
+- `RERANKER_MODEL`, `RERANKER_CANDIDATES`, `ENABLE_RERANKER`: optional local reranking settings.
 
-## Evaluation limits
+## Project structure
 
-Retrieval results depend on the labeled question set. The existing 15-question set is a small development set; its previous 1.000 metrics are not a general accuracy guarantee. Review answer correctness, source support, abstention, latency, and fallback frequency manually before making quality claims. Do not treat a reranker score as a probability.
+```text
+app/
+  ingestion/
+    loader.py          Discover and dispatch supported files
+    parser.py          Extract PDF, DOCX, and Markdown text and section paths
+    chunker.py         Create parent sections and child passages
+    schemas.py         Parsed document, parent, child, and metadata records
+  embeddings/
+    contextualize.py   Add document metadata to embedding input
+    gemini.py          Gemini embedding client
+  retrieval.py         FAISS + BM25 indexes, query variants, RRF, reranking, evaluation
+  generation.py        Grounded answers, generation fallback, citation checks
+  api.py               Local FastAPI endpoints
+  static/index.html    Browser chat interface
+data/
+  evaluation/          Labeled retrieval questions and answer review records
+  raw/                 Place source documents here locally; files are Git-ignored
+artifacts/retrieval/   Generated FAISS index and metadata; Git-ignored
+```
+
+## Known limitations
+
+- **PDF headings are heuristic.** Typography-based heading detection can miss headings or classify short bold text as a heading. Check section paths when using PDFs with unusual layouts.
+- **Tokenizer approximation.** Chunk and evidence budgets use GPT `cl100k_base`, not Gemini's tokenizer, so counts are approximate.
+- **Small evaluation set.** The 15 labeled queries help compare retrieval changes on this corpus. Results do not generalize to unseen documents or question types.
+- **Citation checks are structural.** Valid citation labels do not prove semantic claim support. Review generated answers against their cited passages.
+- **No authentication.** Keep the API bound to localhost; do not expose it to a network without adding access controls.
+- **Single-browser chat history.** Conversation history is held in browser memory and is lost when the tab is closed. It is not shared across users or devices.
+- **Reranker results are corpus-dependent.** MiniLM is optional and its score is not a probability. An earlier dense-only comparison showed a small ranking regression. Reranking stays disabled by default until its effect on hybrid results is measured.
